@@ -227,6 +227,99 @@ function ConfirmButton({ place, onConfirmed }: { place: Place; onConfirmed: (id:
   );
 }
 
+function SuggestHoursButton({ place }: { place: Place }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [opensAt, setOpensAt] = useState("");
+  const [closesAt, setClosesAt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (done) return (
+    <p className="mt-1 text-xs font-medium text-emerald-600">✓ Thanks for your suggestion!</p>
+  );
+
+  async function submit() {
+    if (!text.trim() && !opensAt && !closesAt) return;
+    setBusy(true);
+    await supabase.from("hours_suggestions").insert({
+      place_id: place.id,
+      suggestion: text.trim() || `${opensAt}–${closesAt}`,
+      opens_at: opensAt || null,
+      closes_at: closesAt || null,
+      device_id: getDeviceId(),
+    });
+    setBusy(false);
+    setDone(true);
+    setOpen(false);
+  }
+
+  return (
+    <div className="mt-1">
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-800"
+        >
+          <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clipRule="evenodd" />
+          </svg>
+          Suggest hours
+        </button>
+      ) : (
+        <div className="mt-2 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
+          <p className="text-xs font-semibold text-emerald-700">Suggest opening hours</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-emerald-600">Opens</label>
+              <input
+                type="time"
+                value={opensAt}
+                onChange={(e) => setOpensAt(e.target.value)}
+                className="mt-0.5 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-emerald-600">Closes</label>
+              <input
+                type="time"
+                value={closesAt}
+                onChange={(e) => setClosesAt(e.target.value)}
+                className="mt-0.5 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+          </div>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={2}
+            placeholder="e.g. Mon-Fri 10:00-22:00, Sat 11:00-20:00, closed Sun"
+            className="w-full resize-none rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={busy}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {busy ? "Sending…" : "Submit"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UserDot({ position }: { position: { lat: number; lng: number } }) {
   return (
     <AdvancedMarker position={position} title="Your location">
@@ -500,6 +593,7 @@ export default function Home() {
                           <MapsButton place={place} />
                         </div>
                         <ConfirmButton place={place} onConfirmed={handleConfirmed} />
+                        <SuggestHoursButton place={place} />
                       </div>
                       <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
                         {place.category}
