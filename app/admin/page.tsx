@@ -304,7 +304,7 @@ export default function AdminPage() {
                       </div>
 
                       {/* Google Maps verify link */}
-                      
+                      <a
                         href={`https://www.google.com/maps/search/${encodeURIComponent(p.name + " " + p.address + " " + p.city)}`}
                         target="_blank"
                         rel="noopener noreferrer"
