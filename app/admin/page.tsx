@@ -29,7 +29,12 @@ type EditState = {
 
 const CATEGORIES = ["Restaurant", "Grocery", "Mosque"];
 
+const ADMIN_PASSWORD = "halalhits2026";
+
 export default function AdminPage() {
+  const [authed, setAuthed] = useState(false);
+  const [pwInput, setPwInput] = useState("");
+  const [pwError, setPwError] = useState(false);
   const [rows, setRows] = useState<PendingPlace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +116,43 @@ export default function AdminPage() {
     setApprovingAll(false);
     setSuccessCount((c) => c + rows.length);
     setRows([]);
+  }
+
+  if (!authed) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-emerald-50 px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
+          <h1 className="mb-1 text-xl font-bold text-emerald-800">Admin access</h1>
+          <p className="mb-4 text-sm text-emerald-600">Enter the admin password to continue.</p>
+          <input
+            type="password"
+            value={pwInput}
+            onChange={(e) => { setPwInput(e.target.value); setPwError(false); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (pwInput === ADMIN_PASSWORD) setAuthed(true);
+                else setPwError(true);
+              }
+            }}
+            placeholder="Password"
+            className="w-full rounded-xl border border-emerald-200 bg-emerald-50/40 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+          />
+          {pwError && (
+            <p className="mt-2 text-xs text-red-600">Incorrect password.</p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (pwInput === ADMIN_PASSWORD) setAuthed(true);
+              else setPwError(true);
+            }}
+            className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            Enter
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
