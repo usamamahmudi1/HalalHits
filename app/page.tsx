@@ -164,7 +164,7 @@ function TrustBadge({ place }: { place: Place }) {
 function MapsButton({ place }: { place: Place }) {
   if (!hasCoords(place)) return null;
   return (
-    
+    <a
       href={googleMapsUrl(place)}
       target="_blank"
       rel="noopener noreferrer"
