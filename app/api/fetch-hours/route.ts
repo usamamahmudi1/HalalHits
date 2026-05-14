@@ -21,73 +21,82 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Search for the place
-    const query = encodeURIComponent(`${placeName} ${address} ${city}`);
-    const findRes = await fetch(
-      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${query}&inputtype=textquery&fields=place_id,name,opening_hours&key=${apiKey}`,
+    // Step 1 — Text search (more reliable than findplacefromtext)
+    const query = encodeURIComponent(`${placeName} ${address} ${city} Sweden`);
+    const searchRes = await fetch(
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${apiKey}`,
     );
-    const findData = await findRes.json() as {
-      candidates?: { place_id?: string; name?: string }[];
+    const searchData = await searchRes.json() as {
+      results?: { place_id?: string; name?: string }[];
       status?: string;
+      error_message?: string;
     };
 
-    if (!findData.candidates?.length || !findData.candidates[0].place_id) {
+    if (searchData.error_message) {
       return NextResponse.json(
-        { error: "Place not found on Google Maps." },
+        { error: `Google API error: ${searchData.error_message}` },
+        { status: 500 },
+      );
+    }
+
+    if (!searchData.results?.length || !searchData.results[0].place_id) {
+      return NextResponse.json(
+        { error: `Place not found. Google status: ${searchData.status ?? "UNKNOWN"}` },
         { status: 404 },
       );
     }
 
-    const placeId = findData.candidates[0].place_id;
+    const placeId = searchData.results[0].place_id;
 
-    // Get full details including hours
+    // Step 2 — Get place details with opening hours
     const detailRes = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,opening_hours,current_opening_hours&key=${apiKey}`,
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,opening_hours&key=${apiKey}`,
     );
     const detailData = await detailRes.json() as {
       result?: {
         opening_hours?: {
           weekday_text?: string[];
           periods?: {
-            open?: { time?: string };
-            close?: { time?: string };
+            open?: { day?: number; time?: string };
+            close?: { day?: number; time?: string };
           }[];
         };
       };
+      error_message?: string;
     };
+
+    if (detailData.error_message) {
+      return NextResponse.json(
+        { error: `Google API error: ${detailData.error_message}` },
+        { status: 500 },
+      );
+    }
 
     const hours = detailData.result?.opening_hours;
     if (!hours) {
       return NextResponse.json(
-        { error: "No hours found for this place on Google." },
+        { error: "Place found but no opening hours on Google." },
         { status: 404 },
       );
     }
 
-    // Get today's open/close
-    const today = new Date().getDay(); // 0=Sun
-    const todayPeriod = hours.periods?.find(
-      (p) => {
-        // periods use numeric day 0=Sun
-        return true; // just grab first period as fallback
-      }
-    );
-    const opensAt = hours.periods?.[0]?.open?.time
-      ? `${hours.periods[0].open.time.slice(0, 2)}:${hours.periods[0].open.time.slice(2)}`
-      : null;
-    const closesAt = hours.periods?.[0]?.close?.time
-      ? `${hours.periods[0].close.time.slice(0, 2)}:${hours.periods[0].close.time.slice(2)}`
-      : null;
+    // Get Monday period as a representative open/close (day 1 = Monday)
+    const mondayPeriod = hours.periods?.find((p) => p.open?.day === 1);
+    const firstPeriod = mondayPeriod ?? hours.periods?.[0];
 
+    function formatTime(t?: string): string | null {
+      if (!t || t.length < 4) return null;
+      return `${t.slice(0, 2)}:${t.slice(2)}`;
+    }
+
+    const opensAt = formatTime(firstPeriod?.open?.time);
+    const closesAt = formatTime(firstPeriod?.close?.time);
     const weekdayText = hours.weekday_text?.join("\n") ?? null;
 
-    return NextResponse.json({
-      placeId,
-      opensAt,
-      closesAt,
-      weekdayText,
-    });
+    return NextResponse.json({ placeId, opensAt, closesAt, weekdayText });
+
   } catch (e) {
+    console.error("fetch-hours error:", e);
     return NextResponse.json(
       { error: "Server error fetching hours." },
       { status: 500 },
