@@ -44,7 +44,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "mosque", label: "Mosque" },
 ];
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getDeviceId(): string {
   if (typeof window === "undefined") return "";
@@ -56,7 +56,6 @@ function getDeviceId(): string {
   return id;
 }
 
-/** Haversine distance in km between two lat/lng points */
 function distanceKm(
   lat1: number, lng1: number,
   lat2: number, lng2: number,
@@ -97,6 +96,10 @@ function hasCoords(p: Place): p is Place & { lat: number; lng: number } {
   return p.lat != null && p.lng != null && Number.isFinite(p.lat) && Number.isFinite(p.lng);
 }
 
+function googleMapsUrl(place: Place & { lat: number; lng: number }): string {
+  return `https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function InfoTooltip({ text }: { text: string }) {
@@ -112,7 +115,11 @@ function InfoTooltip({ text }: { text: string }) {
       {open && (
         <span className="absolute bottom-full left-1/2 z-50 mb-1.5 w-56 -translate-x-1/2 rounded-xl border border-gray-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-gray-700 shadow-lg">
           {text}
-          <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(false); }} className="mt-1.5 block text-xs font-semibold text-emerald-600">Got it</button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+            className="mt-1.5 block text-xs font-semibold text-emerald-600"
+          >Got it</button>
         </span>
       )}
     </span>
@@ -122,6 +129,7 @@ function InfoTooltip({ text }: { text: string }) {
 function TrustBadge({ place }: { place: Place }) {
   const tier = getTrustTier(place);
   const count = place.confirmation_count ?? 0;
+
   if (tier === "verified") return (
     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
       <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -130,6 +138,7 @@ function TrustBadge({ place }: { place: Place }) {
       Verified
     </span>
   );
+
   if (tier === "community") return (
     <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">
       <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -139,6 +148,7 @@ function TrustBadge({ place }: { place: Place }) {
       <InfoTooltip text="Confirmed halal by the community. 3+ confirmations = community trusted. Admin verification is the highest level." />
     </span>
   );
+
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
       <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -151,11 +161,30 @@ function TrustBadge({ place }: { place: Place }) {
   );
 }
 
+function MapsButton({ place }: { place: Place }) {
+  if (!hasCoords(place)) return null;
+  return (
+    
+      href={googleMapsUrl(place)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-medium text-red-600 shadow-sm transition hover:bg-red-50"
+      aria-label={`Open ${place.name} in Google Maps`}
+    >
+      <svg viewBox="0 0 24 24" className="h-3 w-3 fill-current" aria-hidden>
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+      </svg>
+      Maps
+    </a>
+  );
+}
+
 function ConfirmButton({ place, onConfirmed }: { place: Place; onConfirmed: (id: string) => void }) {
   const deviceId = getDeviceId();
   const alreadyVoted = (place.confirmed_by ?? []).includes(deviceId);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(alreadyVoted);
+
   if (getTrustTier(place) === "verified") return null;
 
   async function confirm() {
@@ -170,15 +199,29 @@ function ConfirmButton({ place, onConfirmed }: { place: Place; onConfirmed: (id:
   }
 
   return (
-    <button type="button" onClick={() => void confirm()} disabled={busy || done}
+    <button
+      type="button"
+      onClick={() => void confirm()}
+      disabled={busy || done}
       className={done
         ? "mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
         : "mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:opacity-50"
-      }>
+      }
+    >
       {done ? (
-        <><svg className="h-3.5 w-3.5 text-emerald-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" /></svg>You confirmed this</>
+        <>
+          <svg className="h-3.5 w-3.5 text-emerald-600" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+          </svg>
+          You confirmed this
+        </>
       ) : (
-        <><svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M1 8.25a1.25 1.25 0 112.5 0v7.5a1.25 1.25 0 11-2.5 0v-7.5zM11 3V1.7c0-.268.14-.526.395-.607A2 2 0 0114 3c0 .995-.182 1.948-.514 2.826-.204.54.166 1.174.744 1.174h2.52c1.243 0 2.261 1.01 2.146 2.247a23.864 23.864 0 01-1.341 5.974C17.153 16.323 16.072 17 14.9 17H8c-.71 0-1.4-.185-1.985-.542A5.456 5.456 0 015 12.75V10.5a2 2 0 012-2h.093A2.75 2.75 0 009.75 6.25V5c0-1.105.895-2 2-2z" /></svg>{busy ? "Confirming…" : "I confirm this is halal"}</>
+        <>
+          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M1 8.25a1.25 1.25 0 112.5 0v7.5a1.25 1.25 0 11-2.5 0v-7.5zM11 3V1.7c0-.268.14-.526.395-.607A2 2 0 0114 3c0 .995-.182 1.948-.514 2.826-.204.54.166 1.174.744 1.174h2.52c1.243 0 2.261 1.01 2.146 2.247a23.864 23.864 0 01-1.341 5.974C17.153 16.323 16.072 17 14.9 17H8c-.71 0-1.4-.185-1.985-.542A5.456 5.456 0 015 12.75V10.5a2 2 0 012-2h.093A2.75 2.75 0 009.75 6.25V5c0-1.105.895-2 2-2z" />
+          </svg>
+          {busy ? "Confirming…" : "I confirm this is halal"}
+        </>
       )}
     </button>
   );
@@ -195,7 +238,9 @@ function UserDot({ position }: { position: { lat: number; lng: number } }) {
   );
 }
 
-function PlaceMarker({ place, selected, onSelect, onConfirmed, userLocation }: {
+function PlaceMarker({
+  place, selected, onSelect, onConfirmed, userLocation,
+}: {
   place: Place & { lat: number; lng: number };
   selected: boolean;
   onSelect: (id: string | null) => void;
@@ -206,11 +251,18 @@ function PlaceMarker({ place, selected, onSelect, onConfirmed, userLocation }: {
   const tier = getTrustTier(place);
   const pinColor = tier === "verified" ? "#16a34a" : tier === "community" ? "#2563eb" : "#d97706";
   const pinBorder = tier === "verified" ? "#15803d" : tier === "community" ? "#1d4ed8" : "#b45309";
-  const dist = userLocation ? distanceKm(userLocation.lat, userLocation.lng, place.lat, place.lng) : null;
+  const dist = userLocation
+    ? distanceKm(userLocation.lat, userLocation.lng, place.lat, place.lng)
+    : null;
 
   return (
     <>
-      <AdvancedMarker ref={markerRef} position={{ lat: place.lat, lng: place.lng }} title={place.name} onClick={() => onSelect(place.id)}>
+      <AdvancedMarker
+        ref={markerRef}
+        position={{ lat: place.lat, lng: place.lng }}
+        title={place.name}
+        onClick={() => onSelect(place.id)}
+      >
         <Pin background={pinColor} borderColor={pinBorder} glyphColor="#ffffff" />
       </AdvancedMarker>
       {selected && marker && (
@@ -224,6 +276,9 @@ function PlaceMarker({ place, selected, onSelect, onConfirmed, userLocation }: {
                 📍 {formatDistance(dist)}
               </p>
             )}
+            <div className="pt-1">
+              <MapsButton place={place} />
+            </div>
             <ConfirmButton place={place} onConfirmed={onConfirmed} />
           </div>
         </InfoWindow>
@@ -244,7 +299,6 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState<UserLocation>(null);
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "denied" | "ok">("idle");
 
-  // Load places
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -263,7 +317,6 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
 
-  // Request user location
   useEffect(() => {
     if (!navigator.geolocation) return;
     setLocationStatus("loading");
@@ -273,13 +326,15 @@ export default function Home() {
         setLocationStatus("ok");
       },
       () => setLocationStatus("denied"),
-      { timeout: 8000 }
+      { timeout: 8000 },
     );
   }, []);
 
   function handleConfirmed(id: string) {
     setPlaces((prev) => prev.map((p) =>
-      p.id === id ? { ...p, confirmation_count: (p.confirmation_count ?? 0) + 1, confirmed_by: [...(p.confirmed_by ?? []), getDeviceId()] } : p
+      p.id === id
+        ? { ...p, confirmation_count: (p.confirmation_count ?? 0) + 1, confirmed_by: [...(p.confirmed_by ?? []), getDeviceId()] }
+        : p
     ));
   }
 
@@ -288,7 +343,6 @@ export default function Home() {
     [places, filter],
   );
 
-  // Sort by distance if we have user location, otherwise by name
   const sortedFiltered = useMemo(() => {
     if (!userLocation) return filtered;
     return [...filtered].sort((a, b) => {
@@ -309,9 +363,10 @@ export default function Home() {
     <div className="min-h-dvh bg-emerald-50 text-emerald-950">
       <header className="sticky top-0 z-20 border-b border-emerald-200/80 bg-white/90 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:py-5">
-          <h1 className="text-xl font-bold tracking-tight text-emerald-800 sm:text-2xl">HalalHits 🕌</h1>
+          <h1 className="text-xl font-bold tracking-tight text-emerald-800 sm:text-2xl">
+            HalalHits 🕌
+          </h1>
           <div className="flex items-center gap-2">
-            {/* Location status indicator */}
             {locationStatus === "loading" && (
               <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
@@ -331,11 +386,15 @@ export default function Home() {
             )}
             <div className="flex rounded-full border border-emerald-200 bg-emerald-50/80 p-1 shadow-sm" role="group">
               {(["map", "list"] as const).map((v) => (
-                <button key={v} type="button" onClick={() => setView(v)}
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setView(v)}
                   className={v === view
                     ? "rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm capitalize"
                     : "rounded-full px-4 py-2 text-sm font-medium text-emerald-700 transition hover:text-emerald-900 capitalize"
-                  }>{v}</button>
+                  }
+                >{v}</button>
               ))}
             </div>
           </div>
@@ -355,11 +414,15 @@ export default function Home() {
         {/* Filters */}
         <div className="mb-5 flex flex-wrap gap-2">
           {FILTERS.map((f) => (
-            <button key={f.id} type="button" onClick={() => setFilter(f.id)}
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFilter(f.id)}
               className={filter === f.id
                 ? "rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm ring-2 ring-emerald-600 ring-offset-2 ring-offset-emerald-50"
                 : "rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50"
-              }>{f.label}</button>
+              }
+            >{f.label}</button>
           ))}
         </div>
 
@@ -401,7 +464,9 @@ export default function Home() {
             </div>
           )
         ) : sortedFiltered.length === 0 ? (
-          <p className="rounded-xl border border-emerald-200 bg-white px-4 py-8 text-center text-sm text-emerald-700">No places in this category yet.</p>
+          <p className="rounded-xl border border-emerald-200 bg-white px-4 py-8 text-center text-sm text-emerald-700">
+            No places in this category yet.
+          </p>
         ) : (
           <ul className="flex flex-col gap-3">
             {sortedFiltered.map((place) => {
@@ -413,9 +478,9 @@ export default function Home() {
                   <article className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm ring-1 ring-emerald-100/60">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="truncate text-lg font-semibold text-emerald-900">{place.name}</h2>
-                        </div>
+                        <h2 className="truncate text-lg font-semibold text-emerald-900">
+                          {place.name}
+                        </h2>
                         <p className="mt-1 text-sm text-emerald-700/90">{place.city}</p>
                         {dist !== null && (
                           <p className="mt-1 flex items-center gap-1 text-xs font-medium text-blue-700">
@@ -426,10 +491,13 @@ export default function Home() {
                           </p>
                         )}
                         {place.opens_at && place.closes_at && (
-                          <p className="mt-1 text-xs font-medium text-emerald-700">{place.opens_at} – {place.closes_at}</p>
+                          <p className="mt-1 text-xs font-medium text-emerald-700">
+                            {place.opens_at} – {place.closes_at}
+                          </p>
                         )}
-                        <div className="mt-2">
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
                           <TrustBadge place={place} />
+                          <MapsButton place={place} />
                         </div>
                         <ConfirmButton place={place} onConfirmed={handleConfirmed} />
                       </div>
