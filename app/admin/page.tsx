@@ -39,6 +39,11 @@ type FetchedData = {
   formattedAddress: string | null;
   lat: number | null;
   lng: number | null;
+  googleRating: number | null;
+  googleReviewCount: number | null;
+  googleMapsUrl: string | null;
+  phone: string | null;
+  website: string | null;
 };
 
 type PlaceWithSuggestions = PendingPlace & {
@@ -76,8 +81,18 @@ async function fetchPlaceData(
       formattedAddress?: string | null;
       lat?: number | null;
       lng?: number | null;
+      googleRating?: number | null;
+      googleReviewCount?: number | null;
+      googleMapsUrl?: string | null;
+      phone?: string | null;
+      website?: string | null;
     };
-    if (!res.ok) return { opensAt: null, closesAt: null, weekdayText: null, formattedAddress: null, lat: null, lng: null, error: data.error ?? "Not found" };
+    if (!res.ok) return {
+      opensAt: null, closesAt: null, weekdayText: null,
+      formattedAddress: null, lat: null, lng: null,
+      googleRating: null, googleReviewCount: null, googleMapsUrl: null,
+      phone: null, website: null, error: data.error ?? "Not found",
+    };
     return {
       opensAt: data.opensAt ?? null,
       closesAt: data.closesAt ?? null,
@@ -85,9 +100,19 @@ async function fetchPlaceData(
       formattedAddress: data.formattedAddress ?? null,
       lat: data.lat ?? null,
       lng: data.lng ?? null,
+      googleRating: data.googleRating ?? null,
+      googleReviewCount: data.googleReviewCount ?? null,
+      googleMapsUrl: data.googleMapsUrl ?? null,
+      phone: data.phone ?? null,
+      website: data.website ?? null,
     };
   } catch {
-    return { opensAt: null, closesAt: null, weekdayText: null, formattedAddress: null, lat: null, lng: null, error: "Network error" };
+    return {
+      opensAt: null, closesAt: null, weekdayText: null,
+      formattedAddress: null, lat: null, lng: null,
+      googleRating: null, googleReviewCount: null, googleMapsUrl: null,
+      phone: null, website: null, error: "Network error",
+    };
   }
 }
 
@@ -213,6 +238,11 @@ export default function AdminPage() {
         formattedAddress: result.formattedAddress,
         lat: result.lat,
         lng: result.lng,
+        googleRating: result.googleRating,
+        googleReviewCount: result.googleReviewCount,
+        googleMapsUrl: result.googleMapsUrl,
+        phone: result.phone,
+        website: result.website,
       },
     } : p));
   }
@@ -226,6 +256,11 @@ export default function AdminPage() {
       formattedAddress: string | null;
       lat: number | null;
       lng: number | null;
+      googleRating: number | null;
+      googleReviewCount: number | null;
+      googleMapsUrl: string | null;
+      phone: string | null;
+      website: string | null;
       source: string;
     }>
   ) {
@@ -236,6 +271,11 @@ export default function AdminPage() {
     if (data.formattedAddress !== undefined) update.address = data.formattedAddress;
     if (data.lat !== undefined) update.lat = data.lat;
     if (data.lng !== undefined) update.lng = data.lng;
+    if (data.googleRating !== undefined) update.google_rating = data.googleRating;
+    if (data.googleReviewCount !== undefined) update.google_review_count = data.googleReviewCount;
+    if (data.googleMapsUrl !== undefined) update.google_maps_url = data.googleMapsUrl;
+    if (data.phone !== undefined) update.phone = data.phone;
+    if (data.website !== undefined) update.website = data.website;
     if (data.source) update.hours_source = data.source;
 
     const { error } = await supabase.from("places").update(update).eq("id", placeId);
@@ -287,15 +327,12 @@ export default function AdminPage() {
     setSelectedIds(new Set(hoursPlaces.filter(p => !p.lat || !p.lng).map(p => p.id)));
   }
 
-  function selectAll() {
-    setSelectedIds(new Set(hoursPlaces.map(p => p.id)));
-  }
-
+  function selectAll() { setSelectedIds(new Set(hoursPlaces.map(p => p.id))); }
   function selectNone() { setSelectedIds(new Set()); }
 
   async function bulkFetch(ids: string[]) {
     if (ids.length === 0) return;
-    if (!confirm(`Enrich ${ids.length} place${ids.length > 1 ? "s" : ""} from Google?\n\nThis fetches address, coordinates and opening hours for each selected place and saves automatically.`)) return;
+    if (!confirm(`Enrich ${ids.length} place${ids.length > 1 ? "s" : ""} from Google?\n\nFetches address, coordinates, hours, rating, phone and website. Saves automatically.`)) return;
 
     setBulkFetching(true);
     setBulkResults(null);
@@ -324,6 +361,11 @@ export default function AdminPage() {
         if (result.formattedAddress) update.address = result.formattedAddress;
         if (result.lat) update.lat = result.lat;
         if (result.lng) update.lng = result.lng;
+        if (result.googleRating) update.google_rating = result.googleRating;
+        if (result.googleReviewCount) update.google_review_count = result.googleReviewCount;
+        if (result.googleMapsUrl) update.google_maps_url = result.googleMapsUrl;
+        if (result.phone) update.phone = result.phone;
+        if (result.website) update.website = result.website;
 
         const { error: saveErr } = await supabase.from("places").update(update).eq("id", ids[i]);
         if (!saveErr) applied++;
@@ -338,14 +380,7 @@ export default function AdminPage() {
           lat: result.lat ?? p.lat,
           lng: result.lng ?? p.lng,
           fetchDone: true,
-          fetchedData: {
-            opensAt: result.opensAt,
-            closesAt: result.closesAt,
-            weekdayText: result.weekdayText,
-            formattedAddress: result.formattedAddress,
-            lat: result.lat,
-            lng: result.lng,
-          },
+          fetchedData: result,
         } : p));
       }
     }
@@ -494,17 +529,15 @@ export default function AdminPage() {
         {/* ── ENRICH TAB ── */}
         {tab === "hours" && (
           <>
-            {/* Bulk action bar */}
             <div className="mb-4 rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <p className="text-sm font-semibold text-emerald-800">Enrich places from Google</p>
-                  <p className="text-xs text-emerald-600 mt-0.5">Fetches address, coordinates + opening hours in one click</p>
+                  <p className="text-xs text-emerald-600 mt-0.5">Fetches address, coordinates, hours, rating, phone & website</p>
                 </div>
                 <button type="button" onClick={() => void loadHours()} disabled={bulkFetching} className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">↻ Refresh</button>
               </div>
 
-              {/* Stats */}
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <div className="rounded-lg bg-emerald-50 p-2 text-center">
                   <div className="text-lg font-semibold text-emerald-800">{hoursPlaces.length}</div>
@@ -520,7 +553,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Selection buttons */}
               <div className="flex flex-wrap gap-2 mb-3">
                 <button type="button" onClick={selectMissingHours} disabled={bulkFetching} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50">
                   Missing hours ({placesWithoutHours.length})
@@ -545,7 +577,6 @@ export default function AdminPage() {
                 </button>
               )}
 
-              {/* Progress */}
               {bulkProgress && (
                 <div className="mt-3">
                   <div className="flex justify-between text-xs text-emerald-700 mb-1">
@@ -559,7 +590,6 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* Results */}
               {bulkResults && (
                 <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
                   <p className="text-sm font-semibold text-emerald-800 mb-1">Enrichment complete</p>
@@ -619,7 +649,6 @@ export default function AdminPage() {
                         {isExpanded && (
                           <div className="space-y-4 border-t border-emerald-100 bg-emerald-50/30 p-4">
 
-                            {/* Community suggestions */}
                             {p.suggestions.length > 0 && (
                               <div>
                                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">👥 Community suggestions</p>
@@ -639,12 +668,11 @@ export default function AdminPage() {
                               </div>
                             )}
 
-                            {/* Single fetch */}
                             <div>
                               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">🔍 Enrich from Google</p>
                               <button type="button" onClick={() => void fetchSingle(p.id)} disabled={p.fetchLoading ?? false}
                                 className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">
-                                {p.fetchLoading ? "Fetching…" : "Fetch address, coords & hours"}
+                                {p.fetchLoading ? "Fetching…" : "Fetch address, coords, hours & rating"}
                               </button>
                               {p.fetchError && <p className="mt-2 text-xs text-red-600">⚠ {p.fetchError}</p>}
                               {p.fetchedData && (
@@ -662,11 +690,29 @@ export default function AdminPage() {
                                       <p className="text-sm text-blue-900 font-mono">{p.fetchedData.lat.toFixed(5)}, {p.fetchedData.lng.toFixed(5)}</p>
                                     </div>
                                   )}
-                                  {p.fetchedData.opensAt && (
+                                  {p.fetchedData.googleRating && (
                                     <div className="rounded-lg bg-amber-50 px-3 py-2">
-                                      <p className="text-xs text-amber-600 font-medium">🕐 Hours</p>
-                                      <p className="text-sm text-amber-900">{p.fetchedData.opensAt} – {p.fetchedData.closesAt}</p>
-                                      {p.fetchedData.weekdayText && <pre className="mt-1 whitespace-pre-wrap text-xs text-amber-800">{p.fetchedData.weekdayText}</pre>}
+                                      <p className="text-xs text-amber-600 font-medium">⭐ Rating</p>
+                                      <p className="text-sm text-amber-900">{p.fetchedData.googleRating} / 5 ({p.fetchedData.googleReviewCount?.toLocaleString()} reviews)</p>
+                                    </div>
+                                  )}
+                                  {p.fetchedData.opensAt && (
+                                    <div className="rounded-lg bg-emerald-50 px-3 py-2">
+                                      <p className="text-xs text-emerald-600 font-medium">🕐 Hours</p>
+                                      <p className="text-sm text-emerald-900">{p.fetchedData.opensAt} – {p.fetchedData.closesAt}</p>
+                                      {p.fetchedData.weekdayText && <pre className="mt-1 whitespace-pre-wrap text-xs text-emerald-800">{p.fetchedData.weekdayText}</pre>}
+                                    </div>
+                                  )}
+                                  {p.fetchedData.phone && (
+                                    <div className="rounded-lg bg-gray-50 px-3 py-2">
+                                      <p className="text-xs text-gray-600 font-medium">📞 Phone</p>
+                                      <p className="text-sm text-gray-900">{p.fetchedData.phone}</p>
+                                    </div>
+                                  )}
+                                  {p.fetchedData.website && (
+                                    <div className="rounded-lg bg-gray-50 px-3 py-2">
+                                      <p className="text-xs text-gray-600 font-medium">🌐 Website</p>
+                                      <p className="text-sm text-blue-700 truncate">{p.fetchedData.website}</p>
                                     </div>
                                   )}
                                   <button type="button"
@@ -678,7 +724,6 @@ export default function AdminPage() {
                               )}
                             </div>
 
-                            {/* Manual hours */}
                             <ManualHoursForm
                               place={p}
                               onSave={(o, c) => void applyData(p.id, { opensAt: o, closesAt: c, source: "manual" })}
