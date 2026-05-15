@@ -27,6 +27,16 @@ type Place = {
   opening_hours_text?: string | null;
   confirmation_count?: number;
   confirmed_by?: string[];
+  phone?: string | null;
+  website?: string | null;
+  google_rating?: number | null;
+  google_review_count?: number | null;
+  google_maps_url?: string | null;
+  description?: string | null;
+  jummah_time?: string | null;
+  wudu_facilities?: boolean | null;
+  languages_spoken?: string | null;
+  price_level?: number | null;
 };
 
 type Filter = "all" | "restaurants" | "grocery" | "mosque";
@@ -44,8 +54,6 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "mosque", label: "Mosque" },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function getDeviceId(): string {
   if (typeof window === "undefined") return "";
   let id = localStorage.getItem("halalhits_device_id");
@@ -56,18 +64,11 @@ function getDeviceId(): string {
   return id;
 }
 
-function distanceKm(
-  lat1: number, lng1: number,
-  lat2: number, lng2: number,
-): number {
+function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLng / 2) ** 2;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -97,29 +98,40 @@ function hasCoords(p: Place): p is Place & { lat: number; lng: number } {
 }
 
 function googleMapsUrl(place: Place & { lat: number; lng: number }): string {
-  return `https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`;
+  return place.google_maps_url ?? `https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`;
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((s) => (
+        <svg key={s} className={`h-3 w-3 ${rating >= s ? "text-amber-400" : rating >= s - 0.5 ? "text-amber-300" : "text-gray-200"}`} viewBox="0 0 20 20" fill="currentColor">
+          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+        </svg>
+      ))}
+    </span>
+  );
+}
+
+function PriceLevel({ level }: { level: number }) {
+  return (
+    <span className="text-xs text-emerald-600">
+      {"kr".repeat(level)}
+      <span className="text-emerald-200">{"kr".repeat(4 - level)}</span>
+    </span>
+  );
+}
 
 function InfoTooltip({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
     <span className="relative inline-flex">
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="ml-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-current/20 text-[9px] font-bold leading-none"
-        aria-label="More info"
-      >i</button>
+      <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        className="ml-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-current/20 text-[9px] font-bold leading-none" aria-label="More info">i</button>
       {open && (
         <span className="absolute bottom-full left-1/2 z-50 mb-1.5 w-56 -translate-x-1/2 rounded-xl border border-gray-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-gray-700 shadow-lg">
           {text}
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setOpen(false); }}
-            className="mt-1.5 block text-xs font-semibold text-emerald-600"
-          >Got it</button>
+          <button type="button" onClick={(e) => { e.stopPropagation(); setOpen(false); }} className="mt-1.5 block text-xs font-semibold text-emerald-600">Got it</button>
         </span>
       )}
     </span>
@@ -129,31 +141,22 @@ function InfoTooltip({ text }: { text: string }) {
 function TrustBadge({ place }: { place: Place }) {
   const tier = getTrustTier(place);
   const count = place.confirmation_count ?? 0;
-
   if (tier === "verified") return (
     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-      </svg>
+      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" /></svg>
       Verified
     </span>
   );
-
   if (tier === "community") return (
     <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">
-      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-        <path d="M10 9a3 3 0 100-6 3 3 0 000 6zM6 8a2 2 0 11-4 0 2 2 0 014 0zM1.49 15.326a.78.78 0 01-.358-.442 3 3 0 014.308-3.516 6.484 6.484 0 00-1.905 3.959c-.023.222-.014.442.025.654a4.97 4.97 0 01-2.07-.655zM16.44 15.98a4.97 4.97 0 002.07-.654.78.78 0 00.357-.442 3 3 0 00-4.308-3.517 6.484 6.484 0 011.907 3.96 2.32 2.32 0 01-.026.654zM18 8a2 2 0 11-4 0 2 2 0 014 0zM5.304 16.19a.844.844 0 01-.277-.71 5 5 0 019.947 0 .843.843 0 01-.277.71A6.975 6.975 0 0110 18a6.974 6.974 0 01-4.696-1.81z" />
-      </svg>
+      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zM6 8a2 2 0 11-4 0 2 2 0 014 0zM1.49 15.326a.78.78 0 01-.358-.442 3 3 0 014.308-3.516 6.484 6.484 0 00-1.905 3.959c-.023.222-.014.442.025.654a4.97 4.97 0 01-2.07-.655zM16.44 15.98a4.97 4.97 0 002.07-.654.78.78 0 00.357-.442 3 3 0 00-4.308-3.517 6.484 6.484 0 011.907 3.96 2.32 2.32 0 01-.026.654zM18 8a2 2 0 11-4 0 2 2 0 014 0zM5.304 16.19a.844.844 0 01-.277-.71 5 5 0 019.947 0 .843.843 0 01-.277.71A6.975 6.975 0 0110 18a6.974 6.974 0 01-4.696-1.81z" /></svg>
       {count} confirmed
       <InfoTooltip text="Confirmed halal by the community. 3+ confirmations = community trusted. Admin verification is the highest level." />
     </span>
   );
-
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-      </svg>
+      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
       Needs confirmation
       {count > 0 && <span className="ml-0.5">· {count}</span>}
       <InfoTooltip text="Submitted by a community member but not yet confirmed. Tap 'I confirm this is halal' to help verify it." />
@@ -164,13 +167,9 @@ function TrustBadge({ place }: { place: Place }) {
 function MapsButton({ place }: { place: Place }) {
   if (!hasCoords(place)) return null;
   return (
-    <a
-      href={googleMapsUrl(place)}
-      target="_blank"
-      rel="noopener noreferrer"
+    <a href={googleMapsUrl(place)} target="_blank" rel="noopener noreferrer"
       className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-medium text-red-600 shadow-sm transition hover:bg-red-50"
-      aria-label={`Open ${place.name} in Google Maps`}
-    >
+      aria-label={`Open ${place.name} in Google Maps`}>
       <svg viewBox="0 0 24 24" className="h-3 w-3 fill-current" aria-hidden>
         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
       </svg>
@@ -184,9 +183,7 @@ function ConfirmButton({ place, onConfirmed }: { place: Place; onConfirmed: (id:
   const alreadyVoted = (place.confirmed_by ?? []).includes(deviceId);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(alreadyVoted);
-
   if (getTrustTier(place) === "verified") return null;
-
   async function confirm() {
     if (done || busy) return;
     setBusy(true);
@@ -197,31 +194,16 @@ function ConfirmButton({ place, onConfirmed }: { place: Place; onConfirmed: (id:
     setBusy(false);
     if (!error) { setDone(true); onConfirmed(place.id); }
   }
-
   return (
-    <button
-      type="button"
-      onClick={() => void confirm()}
-      disabled={busy || done}
+    <button type="button" onClick={() => void confirm()} disabled={busy || done}
       className={done
         ? "mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
         : "mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:opacity-50"
-      }
-    >
+      }>
       {done ? (
-        <>
-          <svg className="h-3.5 w-3.5 text-emerald-600" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-          </svg>
-          You confirmed this
-        </>
+        <><svg className="h-3.5 w-3.5 text-emerald-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" /></svg>You confirmed this</>
       ) : (
-        <>
-          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M1 8.25a1.25 1.25 0 112.5 0v7.5a1.25 1.25 0 11-2.5 0v-7.5zM11 3V1.7c0-.268.14-.526.395-.607A2 2 0 0114 3c0 .995-.182 1.948-.514 2.826-.204.54.166 1.174.744 1.174h2.52c1.243 0 2.261 1.01 2.146 2.247a23.864 23.864 0 01-1.341 5.974C17.153 16.323 16.072 17 14.9 17H8c-.71 0-1.4-.185-1.985-.542A5.456 5.456 0 015 12.75V10.5a2 2 0 012-2h.093A2.75 2.75 0 009.75 6.25V5c0-1.105.895-2 2-2z" />
-          </svg>
-          {busy ? "Confirming…" : "I confirm this is halal"}
-        </>
+        <><svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M1 8.25a1.25 1.25 0 112.5 0v7.5a1.25 1.25 0 11-2.5 0v-7.5zM11 3V1.7c0-.268.14-.526.395-.607A2 2 0 0114 3c0 .995-.182 1.948-.514 2.826-.204.54.166 1.174.744 1.174h2.52c1.243 0 2.261 1.01 2.146 2.247a23.864 23.864 0 01-1.341 5.974C17.153 16.323 16.072 17 14.9 17H8c-.71 0-1.4-.185-1.985-.542A5.456 5.456 0 015 12.75V10.5a2 2 0 012-2h.093A2.75 2.75 0 009.75 6.25V5c0-1.105.895-2 2-2z" /></svg>{busy ? "Confirming…" : "I confirm this is halal"}</>
       )}
     </button>
   );
@@ -234,11 +216,7 @@ function SuggestHoursButton({ place }: { place: Place }) {
   const [closesAt, setClosesAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-
-  if (done) return (
-    <p className="mt-1 text-xs font-medium text-emerald-600">✓ Thanks for your suggestion!</p>
-  );
-
+  if (done) return <p className="mt-1 text-xs font-medium text-emerald-600">✓ Thanks for your suggestion!</p>;
   async function submit() {
     if (!text.trim() && !opensAt && !closesAt) return;
     setBusy(true);
@@ -253,66 +231,24 @@ function SuggestHoursButton({ place }: { place: Place }) {
     setDone(true);
     setOpen(false);
   }
-
   return (
     <div className="mt-1">
       {!open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-800"
-        >
-          <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clipRule="evenodd" />
-          </svg>
+        <button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-800">
+          <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clipRule="evenodd" /></svg>
           Suggest hours
         </button>
       ) : (
         <div className="mt-2 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
           <p className="text-xs font-semibold text-emerald-700">Suggest opening hours</p>
           <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs text-emerald-600">Opens</label>
-              <input
-                type="time"
-                value={opensAt}
-                onChange={(e) => setOpensAt(e.target.value)}
-                className="mt-0.5 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-emerald-600">Closes</label>
-              <input
-                type="time"
-                value={closesAt}
-                onChange={(e) => setClosesAt(e.target.value)}
-                className="mt-0.5 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none"
-              />
-            </div>
+            <div><label className="text-xs text-emerald-600">Opens</label><input type="time" value={opensAt} onChange={(e) => setOpensAt(e.target.value)} className="mt-0.5 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none" /></div>
+            <div><label className="text-xs text-emerald-600">Closes</label><input type="time" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} className="mt-0.5 w-full rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none" /></div>
           </div>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={2}
-            placeholder="e.g. Mon-Fri 10:00-22:00, Sat 11:00-20:00, closed Sun"
-            className="w-full resize-none rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none"
-          />
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} placeholder="e.g. Mon-Fri 10:00-22:00, Sat 11:00-20:00, closed Sun" className="w-full resize-none rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs focus:border-emerald-500 focus:outline-none" />
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => void submit()}
-              disabled={busy}
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-            >
-              {busy ? "Sending…" : "Submit"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-            >
-              Cancel
-            </button>
+            <button type="button" onClick={() => void submit()} disabled={busy} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">{busy ? "Sending…" : "Submit"}</button>
+            <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">Cancel</button>
           </div>
         </div>
       )}
@@ -331,9 +267,7 @@ function UserDot({ position }: { position: { lat: number; lng: number } }) {
   );
 }
 
-function PlaceMarker({
-  place, selected, onSelect, onConfirmed, userLocation,
-}: {
+function PlaceMarker({ place, selected, onSelect, onConfirmed, userLocation }: {
   place: Place & { lat: number; lng: number };
   selected: boolean;
   onSelect: (id: string | null) => void;
@@ -344,34 +278,29 @@ function PlaceMarker({
   const tier = getTrustTier(place);
   const pinColor = tier === "verified" ? "#16a34a" : tier === "community" ? "#2563eb" : "#d97706";
   const pinBorder = tier === "verified" ? "#15803d" : tier === "community" ? "#1d4ed8" : "#b45309";
-  const dist = userLocation
-    ? distanceKm(userLocation.lat, userLocation.lng, place.lat, place.lng)
-    : null;
-
+  const dist = userLocation ? distanceKm(userLocation.lat, userLocation.lng, place.lat, place.lng) : null;
   return (
     <>
-      <AdvancedMarker
-        ref={markerRef}
-        position={{ lat: place.lat, lng: place.lng }}
-        title={place.name}
-        onClick={() => onSelect(place.id)}
-      >
+      <AdvancedMarker ref={markerRef} position={{ lat: place.lat, lng: place.lng }} title={place.name} onClick={() => onSelect(place.id)}>
         <Pin background={pinColor} borderColor={pinBorder} glyphColor="#ffffff" />
       </AdvancedMarker>
       {selected && marker && (
         <InfoWindow anchor={marker} onCloseClick={() => onSelect(null)}>
-          <div className="max-w-[240px] space-y-1.5 p-1">
+          <div className="max-w-[260px] space-y-1.5 p-1">
             <p className="font-semibold text-emerald-950">{place.name}</p>
             <TrustBadge place={place} />
-            <p className="text-xs text-neutral-600">{place.address}</p>
-            {dist !== null && (
-              <p className="text-xs font-medium text-blue-700">
-                📍 {formatDistance(dist)}
-              </p>
+            {place.google_rating && (
+              <div className="flex items-center gap-1.5">
+                <StarRating rating={place.google_rating} />
+                <span className="text-xs font-medium text-amber-700">{place.google_rating}</span>
+                {place.google_review_count && <span className="text-xs text-gray-500">({place.google_review_count.toLocaleString()})</span>}
+              </div>
             )}
-            <div className="pt-1">
-              <MapsButton place={place} />
-            </div>
+            <p className="text-xs text-neutral-600">{place.address}</p>
+            {place.opens_at && place.closes_at && <p className="text-xs text-emerald-700">🕐 {place.opens_at} – {place.closes_at}</p>}
+            {place.phone && <p className="text-xs text-emerald-700">📞 {place.phone}</p>}
+            {dist !== null && <p className="text-xs font-medium text-blue-700">📍 {formatDistance(dist)}</p>}
+            <div className="pt-1"><MapsButton place={place} /></div>
             <ConfirmButton place={place} onConfirmed={onConfirmed} />
           </div>
         </InfoWindow>
@@ -379,8 +308,6 @@ function PlaceMarker({
     </>
   );
 }
-
-// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const [places, setPlaces] = useState<Place[]>([]);
@@ -397,10 +324,7 @@ export default function Home() {
     async function load() {
       setLoading(true);
       setError(null);
-      const { data, error: fetchError } = await supabase
-        .from("places")
-        .select("*")
-        .order("name", { ascending: true });
+      const { data, error: fetchError } = await supabase.from("places").select("*").order("name", { ascending: true });
       if (cancelled) return;
       if (fetchError) { setError(fetchError.message); setPlaces([]); }
       else setPlaces((data as Place[]) ?? []);
@@ -414,10 +338,7 @@ export default function Home() {
     if (!navigator.geolocation) return;
     setLocationStatus("loading");
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocationStatus("ok");
-      },
+      (pos) => { setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setLocationStatus("ok"); },
       () => setLocationStatus("denied"),
       { timeout: 8000 },
     );
@@ -425,16 +346,11 @@ export default function Home() {
 
   function handleConfirmed(id: string) {
     setPlaces((prev) => prev.map((p) =>
-      p.id === id
-        ? { ...p, confirmation_count: (p.confirmation_count ?? 0) + 1, confirmed_by: [...(p.confirmed_by ?? []), getDeviceId()] }
-        : p
+      p.id === id ? { ...p, confirmation_count: (p.confirmation_count ?? 0) + 1, confirmed_by: [...(p.confirmed_by ?? []), getDeviceId()] } : p
     ));
   }
 
-  const filtered = useMemo(
-    () => places.filter((p) => matchesFilter(p.category, filter)),
-    [places, filter],
-  );
+  const filtered = useMemo(() => places.filter((p) => matchesFilter(p.category, filter)), [places, filter]);
 
   const sortedFiltered = useMemo(() => {
     if (!userLocation) return filtered;
@@ -456,38 +372,25 @@ export default function Home() {
     <div className="min-h-dvh bg-emerald-50 text-emerald-950">
       <header className="sticky top-0 z-20 border-b border-emerald-200/80 bg-white/90 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:py-5">
-          <h1 className="text-xl font-bold tracking-tight text-emerald-800 sm:text-2xl">
-            HalalHits 🕌
-          </h1>
+          <h1 className="text-xl font-bold tracking-tight text-emerald-800 sm:text-2xl">HalalHits 🕌</h1>
           <div className="flex items-center gap-2">
             {locationStatus === "loading" && (
               <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-                Locating…
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />Locating…
               </span>
             )}
             {locationStatus === "ok" && (
               <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                Near you
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />Near you
               </span>
             )}
             {locationStatus === "denied" && (
-              <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500">
-                📍 Location off
-              </span>
+              <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-500">📍 Location off</span>
             )}
             <div className="flex rounded-full border border-emerald-200 bg-emerald-50/80 p-1 shadow-sm" role="group">
               {(["map", "list"] as const).map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setView(v)}
-                  className={v === view
-                    ? "rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm capitalize"
-                    : "rounded-full px-4 py-2 text-sm font-medium text-emerald-700 transition hover:text-emerald-900 capitalize"
-                  }
-                >{v}</button>
+                <button key={v} type="button" onClick={() => setView(v)}
+                  className={v === view ? "rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm capitalize" : "rounded-full px-4 py-2 text-sm font-medium text-emerald-700 transition hover:text-emerald-900 capitalize"}>{v}</button>
               ))}
             </div>
           </div>
@@ -495,7 +398,6 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-2xl px-4 pb-24 pt-4 sm:pt-6">
-
         {/* Trust legend */}
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs text-emerald-700 shadow-sm">
           <span className="font-semibold text-emerald-800">Trust:</span>
@@ -507,15 +409,11 @@ export default function Home() {
         {/* Filters */}
         <div className="mb-5 flex flex-wrap gap-2">
           {FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setFilter(f.id)}
+            <button key={f.id} type="button" onClick={() => setFilter(f.id)}
               className={filter === f.id
                 ? "rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm ring-2 ring-emerald-600 ring-offset-2 ring-offset-emerald-50"
                 : "rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50"
-              }
-            >{f.label}</button>
+              }>{f.label}</button>
           ))}
         </div>
 
@@ -534,70 +432,120 @@ export default function Home() {
           ) : (
             <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm ring-1 ring-emerald-100/60">
               <APIProvider apiKey={GOOGLE_MAPS_KEY} libraries={["marker"]}>
-                <Map
-                  mapId={MAP_ID}
-                  defaultCenter={mapCenter}
-                  defaultZoom={userLocation ? 13 : 11}
-                  gestureHandling="greedy"
-                  className="h-[min(70dvh,520px)] w-full sm:h-[480px]"
-                >
+                <Map mapId={MAP_ID} defaultCenter={mapCenter} defaultZoom={userLocation ? 13 : 11} gestureHandling="greedy" className="h-[min(70dvh,520px)] w-full sm:h-[480px]">
                   {userLocation && <UserDot position={userLocation} />}
                   {mappable.map((place) => (
-                    <PlaceMarker
-                      key={place.id}
-                      place={place}
-                      selected={selectedMarkerId === place.id}
-                      onSelect={setSelectedMarkerId}
-                      onConfirmed={handleConfirmed}
-                      userLocation={userLocation}
-                    />
+                    <PlaceMarker key={place.id} place={place} selected={selectedMarkerId === place.id} onSelect={setSelectedMarkerId} onConfirmed={handleConfirmed} userLocation={userLocation} />
                   ))}
                 </Map>
               </APIProvider>
             </div>
           )
         ) : sortedFiltered.length === 0 ? (
-          <p className="rounded-xl border border-emerald-200 bg-white px-4 py-8 text-center text-sm text-emerald-700">
-            No places in this category yet.
-          </p>
+          <p className="rounded-xl border border-emerald-200 bg-white px-4 py-8 text-center text-sm text-emerald-700">No places in this category yet.</p>
         ) : (
           <ul className="flex flex-col gap-3">
             {sortedFiltered.map((place) => {
               const dist = (userLocation && hasCoords(place))
                 ? distanceKm(userLocation.lat, userLocation.lng, place.lat, place.lng)
                 : null;
+              const isMosque = place.category.toLowerCase().includes("mosque");
               return (
                 <li key={place.id}>
-                  <article className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm ring-1 ring-emerald-100/60">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <h2 className="truncate text-lg font-semibold text-emerald-900">
-                          {place.name}
-                        </h2>
-                        <p className="mt-1 text-sm text-emerald-700/90">{place.city}</p>
-                        {dist !== null && (
-                          <p className="mt-1 flex items-center gap-1 text-xs font-medium text-blue-700">
-                            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                              <path fillRule="evenodd" d="M9.69 18.933l.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 00.281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 103 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 002.273 1.765 11.842 11.842 0 00.976.544l.062.029.018.008.006.003zM10 11.25a2.25 2.25 0 100-4.5 2.25 2.25 0 000 4.5z" clipRule="evenodd" />
-                            </svg>
-                            {formatDistance(dist)}
-                          </p>
-                        )}
-                        {place.opens_at && place.closes_at && (
-                          <p className="mt-1 text-xs font-medium text-emerald-700">
-                            {place.opens_at} – {place.closes_at}
-                          </p>
-                        )}
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <TrustBadge place={place} />
-                          <MapsButton place={place} />
+                  <article className="rounded-2xl border border-emerald-100 bg-white shadow-sm ring-1 ring-emerald-100/60 overflow-hidden">
+                    {/* Card header */}
+                    <div className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h2 className="truncate text-lg font-semibold text-emerald-900">{place.name}</h2>
+
+                          {/* Rating */}
+                          {place.google_rating && (
+                            <div className="mt-1 flex items-center gap-1.5">
+                              <StarRating rating={place.google_rating} />
+                              <span className="text-xs font-semibold text-amber-700">{place.google_rating}</span>
+                              {place.google_review_count && (
+                                <span className="text-xs text-gray-500">({place.google_review_count.toLocaleString()} reviews)</span>
+                              )}
+                              {place.price_level && <PriceLevel level={place.price_level} />}
+                            </div>
+                          )}
+
+                          {/* Address + city */}
+                          <p className="mt-1 text-xs text-emerald-700/80">{place.address}</p>
+                          <p className="text-xs text-emerald-600">{place.city}</p>
+
+                          {/* Distance */}
+                          {dist !== null && (
+                            <p className="mt-1 flex items-center gap-1 text-xs font-medium text-blue-700">
+                              <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9.69 18.933l.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 00.281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 103 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 002.273 1.765 11.842 11.842 0 00.976.544l.062.029.018.008.006.003zM10 11.25a2.25 2.25 0 100-4.5 2.25 2.25 0 000 4.5z" clipRule="evenodd" />
+                              </svg>
+                              {formatDistance(dist)}
+                            </p>
+                          )}
+
+                          {/* Hours */}
+                          {place.opens_at && place.closes_at && (
+                            <p className="mt-1 text-xs font-medium text-emerald-700">🕐 {place.opens_at} – {place.closes_at}</p>
+                          )}
+
+                          {/* Phone */}
+                          {place.phone && (
+                            <a href={`tel:${place.phone}`} className="mt-1 flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900">
+                              📞 {place.phone}
+                            </a>
+                          )}
+
+                          {/* Website */}
+                          {place.website && (
+                            <a href={place.website} target="_blank" rel="noopener noreferrer"
+                              className="mt-0.5 flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 truncate">
+                              🌐 {place.website.replace(/^https?:\/\/(www\.)?/, "")}
+                            </a>
+                          )}
                         </div>
-                        <ConfirmButton place={place} onConfirmed={handleConfirmed} />
-                        <SuggestHoursButton place={place} />
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+                          {place.category}
+                        </span>
                       </div>
-                      <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
-                        {place.category}
-                      </span>
+
+                      {/* Description */}
+                      {place.description && (
+                        <p className="mt-2 text-xs text-emerald-700 leading-relaxed line-clamp-3">
+                          {place.description}
+                        </p>
+                      )}
+
+                      {/* Mosque-specific */}
+                      {isMosque && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {place.jummah_time && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-800">
+                              🕌 Jummah {place.jummah_time}
+                            </span>
+                          )}
+                          {place.wudu_facilities && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-800">
+                              💧 Wudu available
+                            </span>
+                          )}
+                          {place.languages_spoken && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                              🗣 {place.languages_spoken}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Trust + Maps buttons */}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <TrustBadge place={place} />
+                        <MapsButton place={place} />
+                      </div>
+
+                      <ConfirmButton place={place} onConfirmed={handleConfirmed} />
+                      <SuggestHoursButton place={place} />
                     </div>
                   </article>
                 </li>
@@ -607,11 +555,9 @@ export default function Home() {
         )}
       </main>
 
-      <Link
-        href="/submit"
+      <Link href="/submit"
         className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg ring-2 ring-white/90 transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/70"
-        aria-label="Submit a place"
-      >
+        aria-label="Submit a place">
         <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M12 5v14M5 12h14" />
         </svg>
