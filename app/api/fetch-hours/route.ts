@@ -21,13 +21,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 1 — Text search (more reliable than findplacefromtext)
+    // Step 1 — Text search
     const query = encodeURIComponent(`${placeName} ${address} ${city} Sweden`);
     const searchRes = await fetch(
       `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${apiKey}`,
     );
     const searchData = await searchRes.json() as {
-      results?: { place_id?: string; name?: string }[];
+      results?: {
+        place_id?: string;
+        name?: string;
+        formatted_address?: string;
+        geometry?: { location?: { lat?: number; lng?: number } };
+      }[];
       status?: string;
       error_message?: string;
     };
@@ -46,14 +51,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const placeId = searchData.results[0].place_id;
+    const topResult = searchData.results[0];
+    const placeId = topResult.place_id!;
+    const formattedAddress = topResult.formatted_address ?? null;
+    const lat = topResult.geometry?.location?.lat ?? null;
+    const lng = topResult.geometry?.location?.lng ?? null;
 
     // Step 2 — Get place details with opening hours
     const detailRes = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,opening_hours&key=${apiKey}`,
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,opening_hours,formatted_address,geometry&key=${apiKey}`,
     );
     const detailData = await detailRes.json() as {
       result?: {
+        formatted_address?: string;
+        geometry?: { location?: { lat?: number; lng?: number } };
         opening_hours?: {
           weekday_text?: string[];
           periods?: {
@@ -72,17 +83,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const hours = detailData.result?.opening_hours;
-    if (!hours) {
-      return NextResponse.json(
-        { error: "Place found but no opening hours on Google." },
-        { status: 404 },
-      );
-    }
+    const detail = detailData.result;
+    const finalAddress = detail?.formatted_address ?? formattedAddress;
+    const finalLat = detail?.geometry?.location?.lat ?? lat;
+    const finalLng = detail?.geometry?.location?.lng ?? lng;
 
-    // Get Monday period as a representative open/close (day 1 = Monday)
-    const mondayPeriod = hours.periods?.find((p) => p.open?.day === 1);
-    const firstPeriod = mondayPeriod ?? hours.periods?.[0];
+    const hours = detail?.opening_hours;
+    const mondayPeriod = hours?.periods?.find((p) => p.open?.day === 1);
+    const firstPeriod = mondayPeriod ?? hours?.periods?.[0];
 
     function formatTime(t?: string): string | null {
       if (!t || t.length < 4) return null;
@@ -91,14 +99,22 @@ export async function POST(req: NextRequest) {
 
     const opensAt = formatTime(firstPeriod?.open?.time);
     const closesAt = formatTime(firstPeriod?.close?.time);
-    const weekdayText = hours.weekday_text?.join("\n") ?? null;
+    const weekdayText = hours?.weekday_text?.join("\n") ?? null;
 
-    return NextResponse.json({ placeId, opensAt, closesAt, weekdayText });
+    return NextResponse.json({
+      placeId,
+      formattedAddress: finalAddress,
+      lat: finalLat,
+      lng: finalLng,
+      opensAt,
+      closesAt,
+      weekdayText,
+    });
 
   } catch (e) {
     console.error("fetch-hours error:", e);
     return NextResponse.json(
-      { error: "Server error fetching hours." },
+      { error: "Server error fetching place data." },
       { status: 500 },
     );
   }
