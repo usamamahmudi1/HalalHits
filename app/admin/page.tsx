@@ -37,6 +37,7 @@ type PlaceWithSuggestions = PendingPlace & {
   fetchedHours?: { opensAt: string | null; closesAt: string | null; weekdayText: string | null } | null;
   fetchLoading?: boolean;
   fetchError?: string | null;
+  fetchDone?: boolean;
 };
 
 type EditState = { name: string; category: string; address: string; city: string };
@@ -45,13 +46,35 @@ type Tab = "pending" | "hours";
 const CATEGORIES = ["Restaurant", "Grocery", "Mosque"];
 const ADMIN_PASSWORD = "halalhits2026";
 
+async function fetchHoursForPlace(
+  place: PendingPlace,
+  apiKey?: string,
+): Promise<{ opensAt: string | null; closesAt: string | null; weekdayText: string | null; error?: string }> {
+  try {
+    const res = await fetch("/api/fetch-hours", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ placeName: place.name, address: place.address, city: place.city }),
+    });
+    const data = await res.json() as {
+      error?: string;
+      opensAt?: string | null;
+      closesAt?: string | null;
+      weekdayText?: string | null;
+    };
+    if (!res.ok) return { opensAt: null, closesAt: null, weekdayText: null, error: data.error ?? "Not found" };
+    return { opensAt: data.opensAt ?? null, closesAt: data.closesAt ?? null, weekdayText: data.weekdayText ?? null };
+  } catch {
+    return { opensAt: null, closesAt: null, weekdayText: null, error: "Network error" };
+  }
+}
+
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
   const [pwInput, setPwInput] = useState("");
   const [pwError, setPwError] = useState(false);
   const [tab, setTab] = useState<Tab>("pending");
 
-  // Pending places state
   const [rows, setRows] = useState<PendingPlace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,10 +84,15 @@ export default function AdminPage() {
   const [approvingAll, setApprovingAll] = useState(false);
   const [successCount, setSuccessCount] = useState(0);
 
-  // Hours state
   const [hoursPlaces, setHoursPlaces] = useState<PlaceWithSuggestions[]>([]);
   const [hoursLoading, setHoursLoading] = useState(false);
   const [hoursExpandedId, setHoursExpandedId] = useState<string | null>(null);
+
+  // Bulk fetch state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkFetching, setBulkFetching] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [bulkResults, setBulkResults] = useState<{ found: number; notFound: number; applied: number } | null>(null);
 
   const loadPending = useCallback(async () => {
     setLoading(true);
@@ -81,6 +109,8 @@ export default function AdminPage() {
 
   const loadHours = useCallback(async () => {
     setHoursLoading(true);
+    setSelectedIds(new Set());
+    setBulkResults(null);
     const { data: suggestions } = await supabase
       .from("hours_suggestions")
       .select("*")
@@ -89,23 +119,19 @@ export default function AdminPage() {
 
     const { data: places } = await supabase
       .from("places")
-      .select("id, name, category, address, city, opens_at, closes_at, opening_hours_text")
+      .select("id, name, category, address, city, opens_at, closes_at, opening_hours_text, hours_source")
       .order("name", { ascending: true });
 
     const suggs = (suggestions ?? []) as HoursSuggestion[];
     const placeList = (places ?? []) as PendingPlace[];
 
-    // Only show places that have suggestions OR missing hours
-    const relevant = placeList.filter(p =>
-      suggs.some(s => s.place_id === p.id) || (!p.opens_at && !p.closes_at)
-    );
-
-    setHoursPlaces(relevant.map(p => ({
+    setHoursPlaces(placeList.map(p => ({
       ...p,
       suggestions: suggs.filter(s => s.place_id === p.id),
       fetchedHours: null,
       fetchLoading: false,
       fetchError: null,
+      fetchDone: false,
     })));
     setHoursLoading(false);
   }, []);
@@ -154,30 +180,17 @@ export default function AdminPage() {
     setRows([]);
   }
 
-  async function fetchGoogleHours(placeId: string) {
+  async function fetchSingleHours(placeId: string) {
     const place = hoursPlaces.find(p => p.id === placeId);
     if (!place) return;
     setHoursPlaces(prev => prev.map(p => p.id === placeId ? { ...p, fetchLoading: true, fetchError: null } : p));
-    try {
-      const res = await fetch("/api/fetch-hours", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ placeName: place.name, address: place.address, city: place.city }),
-      });
-      const data = await res.json() as { error?: string; opensAt?: string | null; closesAt?: string | null; weekdayText?: string | null };
-      if (!res.ok) {
-        setHoursPlaces(prev => prev.map(p => p.id === placeId ? { ...p, fetchLoading: false, fetchError: data.error ?? "Not found" } : p));
-      } else {
-        setHoursPlaces(prev => prev.map(p => p.id === placeId ? {
-          ...p,
-          fetchLoading: false,
-          fetchError: null,
-          fetchedHours: { opensAt: data.opensAt ?? null, closesAt: data.closesAt ?? null, weekdayText: data.weekdayText ?? null },
-        } : p));
-      }
-    } catch {
-      setHoursPlaces(prev => prev.map(p => p.id === placeId ? { ...p, fetchLoading: false, fetchError: "Network error" } : p));
-    }
+    const result = await fetchHoursForPlace(place);
+    setHoursPlaces(prev => prev.map(p => p.id === placeId ? {
+      ...p,
+      fetchLoading: false,
+      fetchError: result.error ?? null,
+      fetchedHours: result.error ? null : { opensAt: result.opensAt, closesAt: result.closesAt, weekdayText: result.weekdayText },
+    } : p));
   }
 
   async function applyHours(placeId: string, opensAt: string | null, closesAt: string | null, hoursText: string | null, source: string) {
@@ -188,8 +201,10 @@ export default function AdminPage() {
       hours_source: source,
     }).eq("id", placeId);
     if (!error) {
-      setHoursPlaces(prev => prev.map(p => p.id === placeId ? { ...p, opens_at: opensAt, closes_at: closesAt } : p));
-      alert("Hours saved ✓");
+      setHoursPlaces(prev => prev.map(p => p.id === placeId
+        ? { ...p, opens_at: opensAt, closes_at: closesAt, fetchDone: true }
+        : p
+      ));
     }
   }
 
@@ -209,6 +224,80 @@ export default function AdminPage() {
   async function dismissSuggestion(id: string) {
     await supabase.from("hours_suggestions").update({ status: "dismissed" }).eq("id", id);
     setHoursPlaces(prev => prev.map(p => ({ ...p, suggestions: p.suggestions.filter(s => s.id !== id) })));
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    const missingHours = hoursPlaces.filter(p => !p.opens_at || !p.closes_at);
+    setSelectedIds(new Set(missingHours.map(p => p.id)));
+  }
+
+  function selectNone() { setSelectedIds(new Set()); }
+
+  async function bulkFetchHours(ids: string[]) {
+    if (ids.length === 0) return;
+    if (!confirm(`Fetch hours from Google for ${ids.length} place${ids.length > 1 ? "s" : ""}? This uses Google API credits.`)) return;
+
+    setBulkFetching(true);
+    setBulkResults(null);
+    let found = 0;
+    let notFound = 0;
+    let applied = 0;
+
+    for (let i = 0; i < ids.length; i++) {
+      const place = hoursPlaces.find(p => p.id === ids[i]);
+      if (!place) continue;
+
+      setBulkProgress({ done: i, total: ids.length, current: place.name });
+      setHoursPlaces(prev => prev.map(p => p.id === ids[i] ? { ...p, fetchLoading: true, fetchError: null } : p));
+
+      // Small delay to avoid hammering the API
+      if (i > 0) await new Promise(r => setTimeout(r, 500));
+
+      const result = await fetchHoursForPlace(place);
+
+      if (result.error || (!result.opensAt && !result.closesAt && !result.weekdayText)) {
+        notFound++;
+        setHoursPlaces(prev => prev.map(p => p.id === ids[i] ? {
+          ...p,
+          fetchLoading: false,
+          fetchError: result.error ?? "No hours found",
+        } : p));
+      } else {
+        found++;
+        // Auto-apply if we got hours
+        if (result.opensAt || result.closesAt) {
+          const { error } = await supabase.from("places").update({
+            opens_at: result.opensAt,
+            closes_at: result.closesAt,
+            opening_hours_text: result.weekdayText,
+            hours_source: "google",
+          }).eq("id", ids[i]);
+          if (!error) applied++;
+        }
+        setHoursPlaces(prev => prev.map(p => p.id === ids[i] ? {
+          ...p,
+          fetchLoading: false,
+          fetchError: null,
+          opens_at: result.opensAt ?? p.opens_at,
+          closes_at: result.closesAt ?? p.closes_at,
+          fetchedHours: { opensAt: result.opensAt, closesAt: result.closesAt, weekdayText: result.weekdayText },
+          fetchDone: true,
+        } : p));
+      }
+    }
+
+    setBulkProgress(null);
+    setBulkFetching(false);
+    setBulkResults({ found, notFound, applied });
+    setSelectedIds(new Set());
   }
 
   if (!authed) {
@@ -236,6 +325,8 @@ export default function AdminPage() {
     );
   }
 
+  const placesWithoutHours = hoursPlaces.filter(p => !p.opens_at || !p.closes_at);
+
   return (
     <div className="min-h-dvh bg-emerald-50 text-emerald-950">
       <header className="border-b border-emerald-200/80 bg-white/90 backdrop-blur-sm">
@@ -250,27 +341,14 @@ export default function AdminPage() {
               <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">{rows.length} pending</span>
             )}
           </div>
-          {/* Tabs */}
           <div className="mt-3 flex gap-1 rounded-xl border border-emerald-100 bg-emerald-50/50 p-1">
-            <button
-              type="button"
-              onClick={() => setTab("pending")}
-              className={tab === "pending"
-                ? "flex-1 rounded-lg bg-white py-2 text-sm font-semibold text-emerald-800 shadow-sm"
-                : "flex-1 rounded-lg py-2 text-sm font-medium text-emerald-600 hover:text-emerald-800"
-              }
-            >
-              🏪 Pending places {rows.length > 0 && <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">{rows.length}</span>}
+            <button type="button" onClick={() => setTab("pending")}
+              className={tab === "pending" ? "flex-1 rounded-lg bg-white py-2 text-sm font-semibold text-emerald-800 shadow-sm" : "flex-1 rounded-lg py-2 text-sm font-medium text-emerald-600 hover:text-emerald-800"}>
+              🏪 Pending {rows.length > 0 && <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">{rows.length}</span>}
             </button>
-            <button
-              type="button"
-              onClick={() => setTab("hours")}
-              className={tab === "hours"
-                ? "flex-1 rounded-lg bg-white py-2 text-sm font-semibold text-emerald-800 shadow-sm"
-                : "flex-1 rounded-lg py-2 text-sm font-medium text-emerald-600 hover:text-emerald-800"
-              }
-            >
-              🕐 Opening hours
+            <button type="button" onClick={() => setTab("hours")}
+              className={tab === "hours" ? "flex-1 rounded-lg bg-white py-2 text-sm font-semibold text-emerald-800 shadow-sm" : "flex-1 rounded-lg py-2 text-sm font-medium text-emerald-600 hover:text-emerald-800"}>
+              🕐 Hours
             </button>
           </div>
         </div>
@@ -332,10 +410,10 @@ export default function AdminPage() {
                         {isExpanded && (
                           <div className="space-y-3 border-t border-emerald-100 bg-emerald-50/50 p-4">
                             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Edit before approving</p>
-                            {["name", "address", "city"].map((field) => (
+                            {(["name", "address", "city"] as const).map((field) => (
                               <div key={field}>
                                 <label className="text-xs font-medium text-emerald-700 capitalize">{field}</label>
-                                <input type="text" value={(edit as Record<string, string>)[field]} onChange={(e) => setEdit(p.id, { [field]: e.target.value })} className="mt-1 w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30" />
+                                <input type="text" value={edit[field]} onChange={(e) => setEdit(p.id, { [field]: e.target.value })} className="mt-1 w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30" />
                               </div>
                             ))}
                             <div>
@@ -359,50 +437,125 @@ export default function AdminPage() {
         {/* ── HOURS TAB ── */}
         {tab === "hours" && (
           <>
-            <div className="mb-4 flex gap-3">
-              <button type="button" onClick={() => void loadHours()} className="rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm hover:bg-emerald-50">↻ Refresh</button>
+            {/* Bulk action bar */}
+            <div className="mb-4 rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-sm font-semibold text-emerald-800">Bulk fetch from Google</p>
+                  <p className="text-xs text-emerald-600 mt-0.5">{placesWithoutHours.length} places missing hours · {selectedIds.size} selected</p>
+                </div>
+                <button type="button" onClick={() => void loadHours()} className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100">↻ Refresh</button>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                <button type="button" onClick={selectAll} disabled={bulkFetching} className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">
+                  Select all without hours ({placesWithoutHours.length})
+                </button>
+                <button type="button" onClick={() => setSelectedIds(new Set(hoursPlaces.map(p => p.id)))} disabled={bulkFetching} className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">
+                  Select all ({hoursPlaces.length})
+                </button>
+                {selectedIds.size > 0 && (
+                  <button type="button" onClick={selectNone} disabled={bulkFetching} className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+                    Deselect all
+                  </button>
+                )}
+              </div>
+              {selectedIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void bulkFetchHours(Array.from(selectedIds))}
+                  disabled={bulkFetching}
+                  className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {bulkFetching ? "Fetching…" : `🔍 Fetch hours for ${selectedIds.size} place${selectedIds.size > 1 ? "s" : ""}`}
+                </button>
+              )}
+
+              {/* Progress bar */}
+              {bulkProgress && (
+                <div className="mt-3">
+                  <div className="flex justify-between text-xs text-emerald-700 mb-1">
+                    <span>Fetching: {bulkProgress.current}</span>
+                    <span>{bulkProgress.done}/{bulkProgress.total}</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-emerald-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                      style={{ width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Bulk results */}
+              {bulkResults && (
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-emerald-800">Bulk fetch complete</p>
+                  <div className="mt-1 flex gap-4 text-xs">
+                    <span className="text-emerald-700">✓ {bulkResults.found} found</span>
+                    <span className="text-emerald-700">💾 {bulkResults.applied} applied</span>
+                    <span className="text-amber-700">⚠ {bulkResults.notFound} not found</span>
+                  </div>
+                </div>
+              )}
             </div>
+
             {hoursLoading ? (
               <div className="flex justify-center py-16"><div className="h-10 w-10 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-600" /></div>
             ) : hoursPlaces.length === 0 ? (
               <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-12 text-center shadow-sm">
                 <p className="text-2xl">🕐</p>
-                <p className="mt-2 text-sm font-medium text-emerald-700">No hours to review right now</p>
+                <p className="mt-2 text-sm font-medium text-emerald-700">No places to show</p>
               </div>
             ) : (
-              <ul className="flex flex-col gap-4">
+              <ul className="flex flex-col gap-3">
                 {hoursPlaces.map((p) => {
                   const isExpanded = hoursExpandedId === p.id;
+                  const isSelected = selectedIds.has(p.id);
+                  const hasHours = !!(p.opens_at && p.closes_at);
                   return (
                     <li key={p.id}>
-                      <article className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+                      <article className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition-all ${isSelected ? "border-emerald-400 ring-1 ring-emerald-300" : "border-emerald-100"} ${p.fetchDone ? "border-emerald-300" : ""}`}>
                         <div className="p-4">
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            {/* Checkbox */}
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(p.id)}
+                              disabled={bulkFetching}
+                              className="mt-1.5 h-4 w-4 rounded border-emerald-300 accent-emerald-600 cursor-pointer"
+                            />
                             <div className="min-w-0 flex-1">
-                              <h2 className="text-base font-semibold text-emerald-900">{p.name}</h2>
-                              <p className="text-xs text-emerald-700/80">{p.address}, {p.city}</p>
-                              {p.opens_at && p.closes_at
-                                ? <p className="mt-1 text-xs font-medium text-emerald-700">Current: {p.opens_at} – {p.closes_at}</p>
-                                : <p className="mt-1 text-xs text-amber-600">⚠ No hours set</p>
-                              }
-                              {p.suggestions.length > 0 && (
-                                <span className="mt-1 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">{p.suggestions.length} suggestion{p.suggestions.length > 1 ? "s" : ""}</span>
-                              )}
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <h2 className="text-base font-semibold text-emerald-900">{p.name}</h2>
+                                  <p className="text-xs text-emerald-700/80">{p.address}, {p.city}</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setHoursExpandedId(isExpanded ? null : p.id)}
+                                  className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  {isExpanded ? "▲" : "Manage"}
+                                </button>
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                {hasHours
+                                  ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">🕐 {p.opens_at} – {p.closes_at}</span>
+                                  : <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">⚠ No hours</span>
+                                }
+                                {p.fetchDone && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">✓ Updated</span>}
+                                {p.fetchLoading && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 animate-pulse">Fetching…</span>}
+                                {p.fetchError && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">✗ Not found</span>}
+                                {p.suggestions.length > 0 && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">{p.suggestions.length} suggestion{p.suggestions.length > 1 ? "s" : ""}</span>}
+                              </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setHoursExpandedId(isExpanded ? null : p.id)}
-                              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
-                            >
-                              {isExpanded ? "▲ Close" : "Manage"}
-                            </button>
                           </div>
                         </div>
 
                         {isExpanded && (
                           <div className="space-y-4 border-t border-emerald-100 bg-emerald-50/30 p-4">
 
-                            {/* Community suggestions */}
                             {p.suggestions.length > 0 && (
                               <div>
                                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">👥 Community suggestions</p>
@@ -410,21 +563,11 @@ export default function AdminPage() {
                                   {p.suggestions.map((s) => (
                                     <div key={s.id} className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
                                       <p className="text-sm font-medium text-blue-900">{s.suggestion}</p>
-                                      {s.opens_at && s.closes_at && (
-                                        <p className="mt-0.5 text-xs text-blue-700">🕐 {s.opens_at} – {s.closes_at}</p>
-                                      )}
+                                      {s.opens_at && s.closes_at && <p className="mt-0.5 text-xs text-blue-700">🕐 {s.opens_at} – {s.closes_at}</p>}
                                       <p className="mt-1 text-xs text-blue-500">{new Date(s.created_at).toLocaleString("sv-SE")}</p>
                                       <div className="mt-2 flex gap-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => void acceptSuggestion(s)}
-                                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-                                        >✓ Accept</button>
-                                        <button
-                                          type="button"
-                                          onClick={() => void dismissSuggestion(s.id)}
-                                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                                        >✕ Dismiss</button>
+                                        <button type="button" onClick={() => void acceptSuggestion(s)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">✓ Accept</button>
+                                        <button type="button" onClick={() => void dismissSuggestion(s.id)} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">✕ Dismiss</button>
                                       </div>
                                     </div>
                                   ))}
@@ -432,15 +575,9 @@ export default function AdminPage() {
                               </div>
                             )}
 
-                            {/* Fetch from Google */}
                             <div>
                               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">🔍 Fetch from Google</p>
-                              <button
-                                type="button"
-                                onClick={() => void fetchGoogleHours(p.id)}
-                                disabled={p.fetchLoading}
-                                className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
-                              >
+                              <button type="button" onClick={() => void fetchSingleHours(p.id)} disabled={p.fetchLoading ?? false} className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">
                                 {p.fetchLoading ? "Fetching…" : "Fetch hours from Google"}
                               </button>
                               {p.fetchError && <p className="mt-2 text-xs text-red-600">⚠ {p.fetchError}</p>}
@@ -448,23 +585,13 @@ export default function AdminPage() {
                                 <div className="mt-3 rounded-xl border border-emerald-200 bg-white p-3">
                                   <p className="text-xs font-semibold text-emerald-700 mb-2">Google returned:</p>
                                   {p.fetchedHours.opensAt && <p className="text-sm text-emerald-900">🕐 {p.fetchedHours.opensAt} – {p.fetchedHours.closesAt}</p>}
-                                  {p.fetchedHours.weekdayText && (
-                                    <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-emerald-50 p-2 text-xs text-emerald-800">{p.fetchedHours.weekdayText}</pre>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => void applyHours(p.id, p.fetchedHours!.opensAt, p.fetchedHours!.closesAt, p.fetchedHours!.weekdayText, "google")}
-                                    className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-                                  >
-                                    ✓ Apply these hours
-                                  </button>
+                                  {p.fetchedHours.weekdayText && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-emerald-50 p-2 text-xs text-emerald-800">{p.fetchedHours.weekdayText}</pre>}
+                                  <button type="button" onClick={() => void applyHours(p.id, p.fetchedHours!.opensAt, p.fetchedHours!.closesAt, p.fetchedHours!.weekdayText, "google")} className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">✓ Apply these hours</button>
                                 </div>
                               )}
                             </div>
 
-                            {/* Manual override */}
                             <ManualHoursForm place={p} onSave={(o, c) => void applyHours(p.id, o, c, null, "manual")} />
-
                           </div>
                         )}
                       </article>
@@ -480,16 +607,9 @@ export default function AdminPage() {
   );
 }
 
-function ManualHoursForm({
-  place,
-  onSave,
-}: {
-  place: PlaceWithSuggestions;
-  onSave: (opensAt: string, closesAt: string) => void;
-}) {
+function ManualHoursForm({ place, onSave }: { place: PlaceWithSuggestions; onSave: (opensAt: string, closesAt: string) => void }) {
   const [opensAt, setOpensAt] = useState(place.opens_at ?? "");
   const [closesAt, setClosesAt] = useState(place.closes_at ?? "");
-
   return (
     <div>
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">✏️ Set manually</p>
@@ -503,14 +623,7 @@ function ManualHoursForm({
           <input type="time" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} className="mt-1 w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
         </div>
       </div>
-      <button
-        type="button"
-        onClick={() => onSave(opensAt, closesAt)}
-        disabled={!opensAt || !closesAt}
-        className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-      >
-        Save hours
-      </button>
+      <button type="button" onClick={() => onSave(opensAt, closesAt)} disabled={!opensAt || !closesAt} className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">Save hours</button>
     </div>
   );
 }
