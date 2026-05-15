@@ -21,7 +21,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 1 — Text search
     const query = encodeURIComponent(`${placeName} ${address} ${city} Sweden`);
     const searchRes = await fetch(
       `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${apiKey}`,
@@ -32,37 +31,31 @@ export async function POST(req: NextRequest) {
         name?: string;
         formatted_address?: string;
         geometry?: { location?: { lat?: number; lng?: number } };
+        rating?: number;
+        user_ratings_total?: number;
+        price_level?: number;
       }[];
       status?: string;
       error_message?: string;
     };
 
     if (searchData.error_message) {
-      return NextResponse.json(
-        { error: `Google API error: ${searchData.error_message}` },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: `Google API error: ${searchData.error_message}` }, { status: 500 });
     }
 
     if (!searchData.results?.length || !searchData.results[0].place_id) {
-      return NextResponse.json(
-        { error: `Place not found. Google status: ${searchData.status ?? "UNKNOWN"}` },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: `Place not found. Status: ${searchData.status ?? "UNKNOWN"}` }, { status: 404 });
     }
 
     const topResult = searchData.results[0];
     const placeId = topResult.place_id!;
-    const formattedAddress = topResult.formatted_address ?? null;
-    const lat = topResult.geometry?.location?.lat ?? null;
-    const lng = topResult.geometry?.location?.lng ?? null;
 
-    // Step 2 — Get place details with opening hours
     const detailRes = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,opening_hours,formatted_address,geometry&key=${apiKey}`,
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,geometry,opening_hours,formatted_phone_number,website,rating,user_ratings_total,price_level,url,types&key=${apiKey}`,
     );
     const detailData = await detailRes.json() as {
       result?: {
+        name?: string;
         formatted_address?: string;
         geometry?: { location?: { lat?: number; lng?: number } };
         opening_hours?: {
@@ -72,50 +65,54 @@ export async function POST(req: NextRequest) {
             close?: { day?: number; time?: string };
           }[];
         };
+        formatted_phone_number?: string;
+        website?: string;
+        rating?: number;
+        user_ratings_total?: number;
+        price_level?: number;
+        url?: string;
+        types?: string[];
       };
       error_message?: string;
     };
 
     if (detailData.error_message) {
-      return NextResponse.json(
-        { error: `Google API error: ${detailData.error_message}` },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: `Google API error: ${detailData.error_message}` }, { status: 500 });
     }
 
-    const detail = detailData.result;
-    const finalAddress = detail?.formatted_address ?? formattedAddress;
-    const finalLat = detail?.geometry?.location?.lat ?? lat;
-    const finalLng = detail?.geometry?.location?.lng ?? lng;
+    const d = detailData.result;
+    if (!d) {
+      return NextResponse.json({ error: "No details returned." }, { status: 404 });
+    }
 
-    const hours = detail?.opening_hours;
-    const mondayPeriod = hours?.periods?.find((p) => p.open?.day === 1);
-    const firstPeriod = mondayPeriod ?? hours?.periods?.[0];
+    const mondayPeriod = d.opening_hours?.periods?.find(p => p.open?.day === 1);
+    const firstPeriod = mondayPeriod ?? d.opening_hours?.periods?.[0];
 
     function formatTime(t?: string): string | null {
       if (!t || t.length < 4) return null;
       return `${t.slice(0, 2)}:${t.slice(2)}`;
     }
 
-    const opensAt = formatTime(firstPeriod?.open?.time);
-    const closesAt = formatTime(firstPeriod?.close?.time);
-    const weekdayText = hours?.weekday_text?.join("\n") ?? null;
-
     return NextResponse.json({
       placeId,
-      formattedAddress: finalAddress,
-      lat: finalLat,
-      lng: finalLng,
-      opensAt,
-      closesAt,
-      weekdayText,
+      name: d.name ?? null,
+      formattedAddress: d.formatted_address ?? topResult.formatted_address ?? null,
+      lat: d.geometry?.location?.lat ?? topResult.geometry?.location?.lat ?? null,
+      lng: d.geometry?.location?.lng ?? topResult.geometry?.location?.lng ?? null,
+      opensAt: formatTime(firstPeriod?.open?.time),
+      closesAt: formatTime(firstPeriod?.close?.time),
+      weekdayText: d.opening_hours?.weekday_text?.join("\n") ?? null,
+      phone: d.formatted_phone_number ?? null,
+      website: d.website ?? null,
+      googleRating: d.rating ?? topResult.rating ?? null,
+      googleReviewCount: d.user_ratings_total ?? topResult.user_ratings_total ?? null,
+      googleMapsUrl: d.url ?? null,
+      priceLevel: d.price_level ?? topResult.price_level ?? null,
+      types: d.types ?? [],
     });
 
   } catch (e) {
     console.error("fetch-hours error:", e);
-    return NextResponse.json(
-      { error: "Server error fetching place data." },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Server error." }, { status: 500 });
   }
 }
